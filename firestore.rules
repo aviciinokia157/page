@@ -1,0 +1,27 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function userDoc() { return get(/databases/$(database)/documents/users/$(request.auth.uid)); }
+    function isAdmin() { return signedIn() && userDoc().data.role in ['admin', 'mainAdmin']; }
+    function isMainAdmin() { return signedIn() && userDoc().data.role == 'mainAdmin'; }
+
+    match /users/{userId} {
+      allow create: if signedIn() && request.auth.uid == userId;
+      allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
+      allow update: if signedIn() && (request.auth.uid == userId || isAdmin()) && (!('role' in request.resource.data.diff(resource.data).changedKeys()) || isMainAdmin());
+      allow delete: if isAdmin() && resource.data.role != 'mainAdmin';
+    }
+    match /tables/{tableId} { allow read: if signedIn(); allow write: if isAdmin(); }
+    match /reservations/{reservationId} {
+      allow read: if signedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if signedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+    match /reservationLocks/{lockId} { allow read: if signedIn(); allow create: if signedIn() && request.resource.data.keys().hasAll(['tableId', 'dateKey', 'timeSlot', 'reservationId']); allow delete: if isAdmin(); allow update: if false; }
+    match /notifications/{notificationId} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || isAdmin()); allow write: if isAdmin(); }
+    match /settings/{document=**} { allow read: if signedIn(); allow write: if isAdmin(); }
+    match /auditLogs/{logId} { allow read: if isAdmin(); allow create: if signedIn(); allow update, delete: if false; }
+  }
+}
